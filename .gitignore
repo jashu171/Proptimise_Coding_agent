@@ -1,0 +1,6 @@
+# Runtime inputs and generated repair outputs
+/inputs/
+/outputs/
+
+# OS metadata
+.DS_Store

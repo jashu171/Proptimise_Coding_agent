@@ -29,7 +29,8 @@ def main() -> None:
     url = f"{base_url}/v1/messages"
     payload = json.dumps({
         "model": model,
-        "max_tokens": 64,
+        "max_tokens": 512,
+        "temperature": 0,
         "messages": [
             {"role": "user", "content": "Reply with exactly: proxy works"}
         ],

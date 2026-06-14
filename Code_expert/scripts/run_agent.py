@@ -2,7 +2,7 @@
 """Run the ZipFix Agent repair pipeline on a zipped Python project.
 
 Usage:
-    python scripts/run_agent.py ./dataset/cases/broken_calc.zip
+    python scripts/run_agent.py ../inputs/broken_calc.zip
     python scripts/run_agent.py          # interactive prompt for zip path
 """
 
@@ -24,7 +24,7 @@ from rich.console import Console  # noqa: E402
 # Ensure src/ is importable when running from repo root
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from zipfix_agent.config import UPLOADS_DIR  # noqa: E402
+from zipfix_agent.config import INPUTS_DIR  # noqa: E402
 from zipfix_agent.repair_loop import repair_zip_project  # noqa: E402
 
 console = Console()
@@ -35,9 +35,9 @@ async def _main() -> None:
     if len(sys.argv) > 1:
         zip_path = Path(sys.argv[1])
     else:
-        zip_files = sorted(list(UPLOADS_DIR.glob("*.zip")))
+        zip_files = sorted(list(INPUTS_DIR.glob("*.zip")))
         if zip_files:
-            console.print("\n[bold cyan]Found zip files in uploads/:[/]")
+            console.print(f"\n[bold cyan]Found zip files in {INPUTS_DIR}:[/]")
             for idx, path in enumerate(zip_files, 1):
                 console.print(f"  [bold][{idx}][/bold] {path.name}")
             console.print()

@@ -18,34 +18,52 @@ except ImportError:
 from claude_agent_sdk import ClaudeAgentOptions, query  # noqa: E402
 
 
-async def _test() -> bool:
-    model = os.getenv("MODEL", "gpt-4o-mini")
-
+async def _run_query(model: str) -> str:
     options = ClaudeAgentOptions(
         system_prompt="You are a helpful math assistant. Answer concisely.",
+        tools=[],
         max_turns=1,
         allowed_tools=[],
+        model=model,
         thinking={"type": "disabled"},
+        extra_args={"bare": None},
     )
 
     collected: list[str] = []
 
+    async for message in query(
+        prompt="What is 2+2? Reply with just the number.",
+        options=options,
+    ):
+        if hasattr(message, "content"):
+            for block in message.content:
+                if hasattr(block, "text"):
+                    collected.append(block.text)
+        result = getattr(message, "result", None)
+        if result and str(result) not in collected:
+            collected.append(str(result))
+
+    return " ".join(collected).strip()
+
+
+async def _test() -> bool:
+    model = os.getenv("MODEL", "gpt-4o-mini")
+    timeout_seconds = int(os.getenv("LLM_TEST_TIMEOUT_SECONDS", "90"))
+
+    print(f"Testing Claude SDK route with model={model} timeout={timeout_seconds}s ...", flush=True)
+
     try:
-        async for message in query(
-            prompt="What is 2+2? Reply with just the number.",
-            options=options,
-        ):
-            if hasattr(message, "content"):
-                for block in message.content:
-                    if hasattr(block, "text"):
-                        collected.append(block.text)
+        full = await asyncio.wait_for(_run_query(model), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        print(f"FAIL ❌  LLM call timed out after {timeout_seconds}s")
+        print("         LiteLLM/Ollama is reachable, but the model did not finish in time.")
+        return False
     except Exception as exc:
         print(f"FAIL ❌  LLM call raised an error:")
         print(f"         {type(exc).__name__}: {exc}")
         return False
 
-    full = " ".join(collected).strip()
-    if "4" in full:
+    if full.strip() == "4":
         print(f"PASS ✅  LLM responded correctly to 2+2")
         print(f"         Model: {model}")
         print(f"         Response: {full}")

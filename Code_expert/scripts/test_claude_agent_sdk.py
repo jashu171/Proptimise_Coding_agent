@@ -25,41 +25,60 @@ except ImportError:
 from claude_agent_sdk import ClaudeAgentOptions, query  # noqa: E402
 
 
-async def _test() -> bool:
-    model = os.getenv("MODEL", "gpt-4o-mini")
-
+async def _run_query(model: str) -> str:
     options = ClaudeAgentOptions(
         system_prompt="You are a test assistant. Reply only with the requested exact phrase.",
+        tools=[],
         max_turns=1,
         allowed_tools=[],
+        model=model,
         thinking={"type": "disabled"},
+        extra_args={"bare": None},
     )
 
     collected: list[str] = []
 
+    async for message in query(
+        prompt="Reply with exactly: sdk proxy works",
+        options=options,
+    ):
+        if hasattr(message, "content"):
+            for block in message.content:
+                if hasattr(block, "text"):
+                    collected.append(block.text)
+        result = getattr(message, "result", None)
+        if result and str(result) not in collected:
+            collected.append(str(result))
+
+    return " ".join(collected)
+
+
+async def _test() -> bool:
+    model = os.getenv("MODEL", "gpt-4o-mini")
+    timeout_seconds = int(os.getenv("LLM_TEST_TIMEOUT_SECONDS", "90"))
+
+    print(f"Testing Claude SDK route with model={model} timeout={timeout_seconds}s ...", flush=True)
+
     try:
-        async for message in query(
-            prompt="Reply with exactly: sdk proxy works",
-            options=options,
-        ):
-            if hasattr(message, "content"):
-                for block in message.content:
-                    if hasattr(block, "text"):
-                        collected.append(block.text)
+        response = await asyncio.wait_for(_run_query(model), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        print(f"FAIL ❌  Claude Agent SDK call timed out after {timeout_seconds}s")
+        print("         LiteLLM/Ollama is reachable, but the model did not finish in time.")
+        return False
     except Exception as exc:
         print(f"FAIL ❌  Claude Agent SDK raised an error:")
         print(f"         {type(exc).__name__}: {exc}")
         return False
 
-    full = " ".join(collected).lower()
+    full = response.lower()
     if "sdk proxy works" in full:
-        print("PASS ✅  Claude Agent SDK → LiteLLM → OpenAI pipeline works.")
+        print("PASS ✅  Claude Agent SDK → LiteLLM → Ollama pipeline works.")
         print(f"         Model: {model}")
-        print(f"         Response: {' '.join(collected).strip()}")
+        print(f"         Response: {response.strip()}")
         return True
     else:
         print(f"FAIL ❌  Response did not contain expected phrase:")
-        print(f"         {' '.join(collected)}")
+        print(f"         {response}")
         return False
 
 

@@ -1,59 +1,30 @@
-"""Skill builder – assembles a custom system prompt for the fixer agent.
-
-Combines the base repair rules with the user's intent, codebase structure,
-and the planner's repair plan into a single system prompt (the "custom skill").
-"""
+"""Skill builder – assembles the system prompt for the fixer agent."""
 
 from __future__ import annotations
 
 
+def build_single_shot_skill(base_prompt: str) -> str:
+    """Build a minimal, token-efficient system prompt for the single-shot fixer agent."""
+    return "\n".join([
+        base_prompt.strip(),
+        "",
+        "## RULES",
+        "- Use ONLY relative paths in every tool call. NEVER absolute paths.",
+        "- When calling Read: omit pages param (reads whole file) or use '1-100'. NEVER pages=''.",
+        "- Do NOT read .pyc or binary files.",
+        "- Fix only source files. Never edit test files.",
+        "- After all edits, run `pytest` to verify.",
+        "- If tool calls are not available and you must answer with text, return ONLY JSON in this shape:",
+        '  {"edits":[{"file_path":"relative/path.py","old_string":"exact old text","new_string":"replacement text"}]}',
+        "- Never return fake tool-call JSON as plain text.",
+    ])
+
+
+# Keep legacy function for backwards compatibility
 def build_custom_skill(
     base_prompt: str,
     user_prompt: str,
     codebase_summary: str,
     repair_plan: str,
 ) -> str:
-    """Combine base rules + user intent + structure + plan into one system prompt.
-
-    Parameters
-    ----------
-    base_prompt:
-        The base fixer rules from ``prompts/system_prompt.txt``.
-    user_prompt:
-        What the user asked for in the terminal.
-    codebase_summary:
-        The analyser's structured summary of the project.
-    repair_plan:
-        The planner subagent's step-by-step repair plan.
-
-    Returns
-    -------
-    str
-        The assembled system prompt to pass to the fixer agent.
-    """
-    sections = [
-        base_prompt.strip(),
-        "",
-        "---",
-        "",
-        "## User's Request",
-        user_prompt.strip(),
-        "",
-        "---",
-        "",
-        "## Codebase Structure",
-        codebase_summary.strip(),
-        "",
-        "---",
-        "",
-        "## Repair Plan (follow these steps)",
-        repair_plan.strip(),
-        "",
-        "---",
-        "",
-        "Execute the repair plan above step by step.",
-        "After each file edit, run pytest to verify.",
-        "If a step doesn't apply or is already fixed, skip it.",
-    ]
-
-    return "\n".join(sections)
+    return build_single_shot_skill(base_prompt)

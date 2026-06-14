@@ -2,7 +2,7 @@
 
 The SDK respects ``ANTHROPIC_BASE_URL`` so all traffic flows through the
 local LiteLLM proxy at ``http://localhost:4000`` and from there to
-OpenAI GPT models.  **No OpenAI SDK calls are made here.**
+the configured LiteLLM model.  **No OpenAI SDK calls are made here.**
 
 All agent actions (tool calls, reads, edits, bash commands) are logged
 to the terminal in real time so the user can see what the AI is doing.
@@ -107,11 +107,57 @@ def _process_message(message: object, agent_label: str, collected_text: list[str
             elif hasattr(block, "tool_use_id") and hasattr(block, "is_error"):
                 _log_tool_result(block, agent_label)
 
+        # Log turn token usage if available in the AssistantMessage
+        usage = getattr(message, "usage", None)
+        if isinstance(usage, dict):
+            in_t = usage.get("input_tokens", 0)
+            out_t = usage.get("output_tokens", 0)
+            if in_t > 0 or out_t > 0:
+                console.print(f"  [dim]    ← Tokens: {in_t} in, {out_t} out[/dim]")
+
     # ── ResultMessage: final result ──
     if hasattr(message, "result"):
         result_text = str(getattr(message, "result", ""))
         if result_text:
+            if result_text not in collected_text:
+                collected_text.append(result_text)
             console.print(f"  [bold green]✔ {agent_label} result[/]: [dim]{result_text[:200]}[/dim]")
+
+    if isinstance(message, ResultMessage):
+        usage = getattr(message, "usage", None)
+        model_usage = getattr(message, "model_usage", None)
+        total_cost = getattr(message, "total_cost_usd", None)
+
+        lines = []
+        if isinstance(usage, dict):
+            in_t = usage.get("input_tokens", 0)
+            out_t = usage.get("output_tokens", 0)
+            cache_read = usage.get("cache_read_input_tokens", 0)
+            cache_create = usage.get("cache_creation_input_tokens", 0)
+
+            lines.append(f"  [bold]Tokens:[/] Input: {in_t} | Output: {out_t}")
+            if cache_read > 0 or cache_create > 0:
+                lines.append(f"  [bold]Cache:[/] Read: {cache_read} | Created: {cache_create}")
+
+        if total_cost is not None:
+            lines.append(f"  [bold]Total Cost:[/] ${total_cost:.6f} USD")
+
+        if model_usage and isinstance(model_usage, dict):
+            lines.append("  [bold]Breakdown by Model:[/]")
+            for m_name, m_info in model_usage.items():
+                if isinstance(m_info, dict):
+                    m_in = m_info.get("inputTokens", 0)
+                    m_out = m_info.get("outputTokens", 0)
+                    m_cost = m_info.get("costUSD", 0.0)
+                    lines.append(f"    - [dim]{m_name}[/dim]: Input: {m_in} | Output: {m_out} | Cost: ${m_cost:.6f}")
+
+        if lines:
+            console.print(Panel(
+                "\n".join(lines),
+                title=f"[bold green]📊 {agent_label} Usage Summary[/]",
+                border_style="green",
+                expand=False
+            ))
 
 
 # ── Agent runners ────────────────────────────────────────────────────────────
@@ -135,8 +181,10 @@ async def run_repair_agent(
         system_prompt=system_prompt,
         allowed_tools=["Bash", "Read", "Edit", "Write"],
         max_turns=max_turns,
+        model=model,
         cwd=str(workspace_path),
         thinking={"type": "disabled"},
+        extra_args={"bare": None},
     )
 
     console.print()
@@ -178,15 +226,17 @@ async def run_planner_agent(
         system_prompt=system_prompt,
         allowed_tools=["Bash", "Read"],
         max_turns=6,
+        model=os.getenv("MODEL", MODEL),
         cwd=str(workspace_path),
         thinking={"type": "disabled"},
+        extra_args={"bare": None},
     )
 
     console.print()
     console.print(Panel(
         f"[bold magenta]🔍 Planner Agent (subagent)[/]\n"
         f"  Tools: Bash, Read\n"
-        f"  Max turns: 3\n"
+        f"  Max turns: 6\n"
         f"  Working dir: {workspace_path}",
         border_style="magenta",
     ))

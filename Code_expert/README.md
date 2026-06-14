@@ -91,13 +91,15 @@ zipfix-agent/
 │   ├── test_claude_agent_sdk.py# End-to-end SDK routing test
 │   └── run_agent.py            # CLI entry point
 │
-├── dataset/
-│   └── cases/                  # Place your zipped test cases here
-│
-└── outputs/
-    ├── repaired_projects/      # Extracted + repaired projects
-    ├── json_results/           # Per-project JSON results
-    └── reports/                # Markdown reports
+└── dataset/
+    └── cases/                  # Optional bundled cases
+```
+
+Runtime folders live one level above `Code_expert`:
+
+```text
+../inputs/                       # Place zipped projects here
+../outputs/                      # Generated repaired projects and reports
 ```
 
 ---
@@ -180,14 +182,14 @@ PASS ✅  Claude Agent SDK → LiteLLM → OpenAI pipeline works.
 ### Step 4 — Run the repair agent
 
 ```bash
-python scripts/run_agent.py ./dataset/cases/case_01_wrong_operator/input_project.zip
+python scripts/run_agent.py ../inputs/input_project.zip
 ```
 
 Or run interactively:
 
 ```bash
 python scripts/run_agent.py
-# Enter zip file path: ./dataset/cases/case_01/input_project.zip
+# Select a zip from ../inputs/
 ```
 
 ---

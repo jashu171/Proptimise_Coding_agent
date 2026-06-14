@@ -2,19 +2,20 @@
 # LiteLLM Proxy Configuration for ZipFix Agent
 # ──────────────────────────────────────────────
 # Exposes Anthropic-compatible endpoints on localhost:4000
-# and forwards real inference to OpenAI GPT models.
+# and forwards real inference to a local Ollama coding model.
 # ──────────────────────────────────────────────
 
 model_list:
-  - model_name: gpt-4o-mini
+  - model_name: local-claude-coder
     litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
-
-  - model_name: gpt-4o
-    litellm_params:
-      model: openai/gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
+      model: ollama_chat/qwen2.5-coder:3b
+      api_base: http://localhost:11434
+      keep_alive: "30m"
+      think: false
+      num_predict: 2048
+      temperature: 0
+    model_info:
+      supports_function_calling: true
 
 litellm_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

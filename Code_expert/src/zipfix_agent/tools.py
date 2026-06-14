@@ -25,6 +25,10 @@ def file_hashes(project_dir: Path) -> dict[str, str]:
     """Return ``{relative_path: sha256}`` for every file in *project_dir*."""
     hashes: dict[str, str] = {}
     for p in project_dir.rglob("*"):
+        if "__pycache__" in p.parts or ".pytest_cache" in p.parts:
+            continue
+        if p.suffix in {".pyc", ".pyo"}:
+            continue
         if p.is_file():
             h = hashlib.sha256(p.read_bytes()).hexdigest()
             hashes[str(p.relative_to(project_dir))] = h

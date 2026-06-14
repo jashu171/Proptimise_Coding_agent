@@ -29,3 +29,9 @@ Output format:
 
 ## Repair Plan
 (Numbered steps, each naming the file, function, and exact change to make)
+
+## PATH & TOOL RULES — CRITICAL, NEVER VIOLATE
+
+* ALWAYS use RELATIVE paths for all tool calls (Read, Bash). NEVER use absolute paths.
+* When calling Read, either specify a valid page range (like pages="1-100") or OMIT the pages parameter entirely to read the whole file. NEVER pass pages="" (empty string).
+* DO NOT call Read on binary files (e.g. .pyc, .zip).
