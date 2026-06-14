@@ -30,7 +30,7 @@ def write_report(result: RepairResult, output_path: Path) -> Path:
     ]
 
     if result.codebase_summary:
-        lines.append(result.codebase_summary[:2000])
+        lines.append(result.codebase_summary)
     else:
         lines.append("_No codebase summary generated._")
 
@@ -42,7 +42,7 @@ def write_report(result: RepairResult, output_path: Path) -> Path:
         "",
     ])
     if result.repair_plan:
-        lines.append(result.repair_plan[:2000])
+        lines.append(result.repair_plan)
     else:
         lines.append("_No repair plan generated._")
 
@@ -114,7 +114,7 @@ def write_report(result: RepairResult, output_path: Path) -> Path:
             "<summary>Agent response</summary>",
             "",
             "```",
-            it.agent_response[:4000] if it.agent_response else "(no response)",
+            it.agent_response if it.agent_response else "(no response)",
             "```",
             "",
             "</details>",

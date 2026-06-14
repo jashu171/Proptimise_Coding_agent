@@ -12,7 +12,8 @@ model_list:
       api_base: http://localhost:11434
       keep_alive: "30m"
       think: false
-      num_predict: 2048
+      num_ctx: 32768
+      num_predict: 100000
       temperature: 0
     model_info:
       supports_function_calling: true

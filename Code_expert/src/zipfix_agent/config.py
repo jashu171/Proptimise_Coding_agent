@@ -22,8 +22,8 @@ REASONING_MODEL: str = os.getenv("REASONING_MODEL", "gpt-4o-mini")
 
 # ── Agent behaviour limits ───────────────────────────────────────────────────
 MAX_TURNS: int = int(os.getenv("CLAUDE_CODE_MAX_TURNS", "10"))
-MAX_OUTPUT_TOKENS: int = int(os.getenv("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "3000"))
-BASH_MAX_OUTPUT: int = int(os.getenv("BASH_MAX_OUTPUT_LENGTH", "2000"))
+MAX_OUTPUT_TOKENS: int = int(os.getenv("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "100000"))
+BASH_MAX_OUTPUT: int = int(os.getenv("BASH_MAX_OUTPUT_LENGTH", "100000"))
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 PROMPTS_DIR: Path = _AGENT_ROOT / "prompts"

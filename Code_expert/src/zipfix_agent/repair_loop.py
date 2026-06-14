@@ -13,8 +13,11 @@ Flow:
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -24,7 +27,7 @@ from rich.panel import Panel
 
 from zipfix_agent.agent import run_repair_agent
 from zipfix_agent.checks import run_compile_check, run_pytest
-from zipfix_agent.config import OUTPUTS_DIR, PROMPTS_DIR
+from zipfix_agent.config import BASH_MAX_OUTPUT, MAX_OUTPUT_TOKENS, MODEL, OUTPUTS_DIR, PROMPTS_DIR
 from zipfix_agent.readme_writer import write_report
 from zipfix_agent.schemas import RepairIteration, RepairResult
 from zipfix_agent.scoring import calculate_score
@@ -46,7 +49,7 @@ def _read_project_files(project_dir: Path) -> str:
     SKIP_DIRS = {"__pycache__", ".venv", ".git", "node_modules", ".pytest_cache"}
     SKIP_EXTS = {".pyc", ".pyo", ".zip", ".egg", ".png", ".jpg", ".jpeg", ".gif", ".svg",
                  ".pdf", ".DS_Store"}
-    MAX_FILE_CHARS = 2000  # truncate large files
+    max_file_chars = int(os.getenv("ZIPFIX_MAX_FILE_CHARS", str(BASH_MAX_OUTPUT)))
 
     parts = []
     for f in sorted(project_dir.rglob("*")):
@@ -61,8 +64,8 @@ def _read_project_files(project_dir: Path) -> str:
         except Exception:
             continue
         rel = f.relative_to(project_dir)
-        truncated = content[:MAX_FILE_CHARS]
-        if len(content) > MAX_FILE_CHARS:
+        truncated = content[:max_file_chars]
+        if len(content) > max_file_chars:
             truncated += "\n... [truncated]"
         parts.append(f"### {rel}\n```\n{truncated}\n```")
 
@@ -225,6 +228,154 @@ def _restore_source_snapshot(project_dir: Path, snapshot: dict[str, bytes]) -> l
     return restored
 
 
+def _source_repair_targets(project_dir: Path) -> list[Path]:
+    """Return Python source files the repair loop is allowed to replace."""
+    targets: list[Path] = []
+    for path in sorted(project_dir.rglob("*.py")):
+        rel = str(path.relative_to(project_dir))
+        if "__pycache__" in path.parts or ".pytest_cache" in path.parts:
+            continue
+        if is_test_file(rel):
+            continue
+        targets.append(path)
+    return targets
+
+
+def _extract_code_response(text: str) -> str:
+    """Extract a full-file code response from a model message."""
+    match = re.search(r"```(?:python|py)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        text = match.group(1)
+    return text.strip() + "\n"
+
+
+def _request_full_file_repair(
+    file_path: str,
+    file_content: str,
+    user_prompt: str,
+    pytest_output: str,
+    compile_output: str,
+) -> str | None:
+    """Ask LiteLLM directly for one full-file replacement."""
+    base_url = os.getenv("ANTHROPIC_BASE_URL", "http://localhost:4000").rstrip("/")
+    master_key = os.getenv("LITELLM_MASTER_KEY", "sk-local-zipfix-key")
+    model = os.getenv("MODEL", MODEL)
+
+    prompt = (
+        "You are repairing one Python source file. Return ONLY the complete corrected "
+        "file content. Do not return markdown explanations, JSON, shell commands, or tests. "
+        "Do not add pytest imports, test functions, examples, or demo code to source files.\n\n"
+        f"User task:\n{user_prompt}\n\n"
+        f"Target file: {file_path}\n\n"
+        f"Current pytest output:\n{pytest_output}\n\n"
+        f"Current compile output:\n{compile_output}\n\n"
+        f"Current file content:\n```python\n{file_content}\n```\n"
+    )
+    payload = json.dumps({
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Return only source code for the requested file. Preserve existing "
+                    "public names and signatures. Fix the failing tests by changing implementation "
+                    "source code only. Do not add tests or pytest code to source files."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "max_tokens": MAX_OUTPUT_TOKENS,
+        "temperature": 0,
+        "stream": False,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}/v1/chat/completions",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {master_key}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        console.print(f"[yellow]Full-file fallback request failed:[/] {exc}")
+        return None
+
+    choices = body.get("choices", []) if isinstance(body, dict) else []
+    if not choices:
+        return None
+    content = choices[0].get("message", {}).get("content", "")
+    if not isinstance(content, str) or not content.strip():
+        return None
+    return _extract_code_response(content)
+
+
+def _candidate_contains_test_code(content: str) -> bool:
+    """Reject full-file source candidates that smuggle test code into source files."""
+    suspicious_patterns = [
+        r"^\s*import\s+pytest\b",
+        r"^\s*from\s+pytest\s+import\b",
+        r"^\s*def\s+test_",
+        r"\bpytest\.",
+        r"\bwith\s+pytest\.raises\b",
+    ]
+    return any(re.search(pattern, content, flags=re.MULTILINE) for pattern in suspicious_patterns)
+
+
+def _try_validated_full_file_repair(
+    project_dir: Path,
+    user_prompt: str,
+    pytest_result,
+    compile_result,
+    current_score,
+) -> tuple[list[str], object, object, object]:
+    """Try full-file replacements and keep only candidates that improve score."""
+    changed: list[str] = []
+    best_pytest = pytest_result
+    best_compile = compile_result
+    best_score = current_score
+
+    for target in _source_repair_targets(project_dir):
+        rel = str(target.relative_to(project_dir))
+        original = target.read_text(encoding="utf-8", errors="ignore")
+        candidate = _request_full_file_repair(
+            file_path=rel,
+            file_content=original,
+            user_prompt=user_prompt,
+            pytest_output=best_pytest.output,
+            compile_output=best_compile.output,
+        )
+        if candidate is None or candidate == original:
+            continue
+        if _candidate_contains_test_code(candidate):
+            console.print(f"[yellow]Rejected full-file fallback containing test code:[/] {rel}")
+            continue
+
+        target.write_text(candidate, encoding="utf-8")
+        candidate_pytest = run_pytest(project_dir)
+        candidate_compile = run_compile_check(project_dir)
+        candidate_score = calculate_score(candidate_pytest, candidate_compile)
+
+        if candidate_pytest.passed and candidate_compile.passed:
+            changed.append(rel)
+            return changed, candidate_pytest, candidate_compile, candidate_score
+
+        if candidate_score.score > best_score.score:
+            changed.append(rel)
+            best_pytest = candidate_pytest
+            best_compile = candidate_compile
+            best_score = candidate_score
+            continue
+
+        target.write_text(original, encoding="utf-8")
+
+    return sorted(set(changed)), best_pytest, best_compile, best_score
+
+
 async def repair_zip_project(zip_path: Path) -> RepairResult:
     """Iterative repair pipeline for a zipped Python project."""
     project_name = zip_path.stem
@@ -338,8 +489,8 @@ async def repair_zip_project(zip_path: Path) -> RepairResult:
                     f"- Tests: {score_before_iteration.tests_passed}/"
                     f"{score_before_iteration.tests_total} passed\n"
                     f"- Compile OK: {score_before_iteration.compile_ok}\n\n"
-                    f"## Current Pytest Output\n```\n{current_pytest.output[:3000]}\n```\n\n"
-                    f"## Current Compile Errors\n```\n{current_compile.output[:1500]}\n```\n\n"
+                    f"## Current Pytest Output\n```\n{current_pytest.output}\n```\n\n"
+                    f"## Current Compile Errors\n```\n{current_compile.output}\n```\n\n"
                     f"## Current Source Files\n{source_context}\n\n"
                     "Apply the smallest source-code fixes needed to improve the score. "
                     "Do not edit tests unless the test itself is syntactically broken. "
@@ -377,6 +528,28 @@ async def repair_zip_project(zip_path: Path) -> RepairResult:
                 current_pytest = run_pytest(project_dir)
                 current_compile = run_compile_check(project_dir)
                 current_score = calculate_score(current_pytest, current_compile)
+
+                if not (current_pytest.passed and current_compile.passed):
+                    full_file_changed, fallback_pytest, fallback_compile, fallback_score = _try_validated_full_file_repair(
+                        project_dir=project_dir,
+                        user_prompt=user_prompt,
+                        pytest_result=current_pytest,
+                        compile_result=current_compile,
+                        current_score=current_score,
+                    )
+                    if full_file_changed:
+                        agent_response += (
+                            "\n\n[Validated full-file fallback applied files: "
+                            + ", ".join(full_file_changed)
+                            + "]"
+                        )
+                        current_pytest = fallback_pytest
+                        current_compile = fallback_compile
+                        current_score = fallback_score
+                        console.print(
+                            "[green]✔ Applied validated full-file fallback:[/] "
+                            + ", ".join(full_file_changed)
+                        )
 
                 result.iterations.append(RepairIteration(
                     iteration=iteration_num,

@@ -75,7 +75,7 @@ async def create_repair_plan(
         f"Create a repair plan for this Python project at: {project_dir}\n\n"
         f"## User's Request\n{user_prompt}\n\n"
         f"## Codebase Summary\n{codebase_summary}\n\n"
-        f"## Current Test Output\n{test_output[:3000]}\n\n"
+        f"## Current Test Output\n{test_output}\n\n"
         "Based on the above, create a numbered step-by-step repair plan.\n"
         "For each step, specify:\n"
         "- The exact file to change\n"

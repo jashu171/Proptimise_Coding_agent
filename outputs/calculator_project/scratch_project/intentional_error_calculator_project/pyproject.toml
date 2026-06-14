@@ -1,0 +1,8 @@
+[project]
+name = "intentional-error-calculator"
+version = "0.1.0"
+description = "Small calculator project with intentional bugs for repair testing"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
