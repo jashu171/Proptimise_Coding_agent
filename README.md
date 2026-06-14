@@ -1,10 +1,10 @@
-# 🔧 ZipFix Agent
+# 🔧 Code Expert Agent
 
 > **AI-powered test-driven code repair** built with **Claude Agent SDK** for the Proptimise AI Agentic Engineer take-home assessment.
 
 ---
 
-## What is ZipFix Agent?
+## What is  Code Expert Agent?
 
 ZipFix Agent is a fully automated repair pipeline that:
 
