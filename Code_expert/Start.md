@@ -1,125 +1,165 @@
-# 🚀 Getting Started with ZipFix Agent
+# 🚀 Getting Started with Code Expert Agent
 
-Welcome to **ZipFix Agent**! This guide will walk you through setting up the agent, preparing an example buggy project zip file, and running the repair pipeline.
+Welcome to **Code Expert Agent**! This guide walks you through setting up the full local stack — Ollama + LiteLLM + Claude Agent SDK — and running the repair pipeline on a buggy Python project.
 
 ---
 
-## 🛠️ Step 1: Quick Setup
+## Stack Overview
 
-First, initialize your virtual environment and install the package along with its dependencies:
+```
+Claude Agent SDK
+  │  ANTHROPIC_BASE_URL=http://localhost:4000
+  ▼
+LiteLLM Proxy  (localhost:4000)
+  │  model alias: local-claude-coder → ollama_chat/qwen2.5-coder:3b
+  ▼
+Ollama  (localhost:11434)
+  │
+  ▼
+qwen2.5-coder:3b  (100% local, no cloud calls)
+```
+
+Claude Agent SDK never knows it is talking to an Ollama model. LiteLLM owns the alias mapping transparently.
+
+---
+
+## 🛠️ Step 1: Install Dependencies
 
 ```bash
-# 1. Create and activate a virtual environment
+# From Code_expert/
 python -m venv .venv
 source .venv/bin/activate
 
-# 2. Install ZipFix Agent in editable mode along with LiteLLM proxy
 pip install -e .
 pip install "litellm[proxy]"
-
-# 3. Create your .env file
-cp .env.example .env
 ```
 
-Open the newly created `.env` file and set your **OpenAI API Key**:
+---
+
+## 🤖 Step 2: Install Ollama and Pull the Model
+
+1. Download and install Ollama from [https://ollama.com](https://ollama.com)
+
+2. Pull the coding model:
+   ```bash
+   ollama pull qwen2.5-coder:3b
+   ```
+
+3. Ollama runs automatically in the background after install. You can verify it is up:
+   ```bash
+   ollama list
+   ```
+
+---
+
+## ⚙️ Step 3: Configure Environment
+
+Create a `.env` file inside `Code_expert/`:
+
 ```env
-OPENAI_API_KEY=sk-proj-... # Your real OpenAI API Key
+LITELLM_MASTER_KEY=sk-local-zipfix-key
+ANTHROPIC_BASE_URL=http://localhost:4000
+ANTHROPIC_AUTH_TOKEN=sk-local-zipfix-key
+ANTHROPIC_API_KEY=""
+
+MODEL=local-claude-coder
+REASONING_MODEL=local-claude-coder
+ANTHROPIC_DEFAULT_SONNET_MODEL=local-claude-coder
+ANTHROPIC_DEFAULT_OPUS_MODEL=local-claude-coder
+ANTHROPIC_DEFAULT_HAIKU_MODEL=local-claude-coder
+
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=100000
+ZIPFIX_MAX_FILE_CHARS=100000
 ```
 
----
-
-## 🔗 Step 2: Start and Verify the Proxy
-
-The agent routes all of its API calls through a local LiteLLM proxy to translate Anthropic-format requests to OpenAI GPT models.
-
-1. **Start the Proxy** (in a dedicated terminal):
-   ```bash
-   chmod +x scripts/start_litellm.sh
-   ./scripts/start_litellm.sh
-   ```
-
-2. **Verify connection** (in a new terminal):
-   ```bash
-   source .venv/bin/activate
-   
-   # Check LiteLLM is responding
-   python scripts/test_litellm_proxy.py
-   
-   # Check Claude Agent SDK routes correctly
-   python scripts/test_claude_agent_sdk.py
-   ```
-   > [!TIP]
-   > Make sure both verification commands output `PASS ✅` before moving to the next step.
+> **Important:** `ANTHROPIC_API_KEY` must be blank. This prevents Claude Agent SDK from ever calling `api.anthropic.com`.
 
 ---
 
-## 📦 Step 3: Preparing an Example Buggy Zip File
+## 🔗 Step 4: Start the LiteLLM Proxy
 
-To run the agent, you need a zipped project containing a Python source file with a bug and a corresponding `pytest` test file. Here is how to create a simple calculator example:
+In a **dedicated terminal** (keep it running):
 
-1. **Create the directory structure:**
-   ```bash
-   mkdir -p example_project/tests
-   ```
-
-2. **Create the buggy source file** (`example_project/calc.py`):
-   ```python
-   # example_project/calc.py
-   def add(a, b):
-       # Bug: uses subtraction instead of addition
-       return a - b
-   ```
-
-3. **Create the test file** (`example_project/tests/test_calc.py`):
-   ```python
-   # example_project/tests/test_calc.py
-   from calc import add
-
-   def test_add():
-       assert add(2, 3) == 5
-   ```
-
-4. **Zip the folder:**
-   ```bash
-   # Package the project folder into a zip file
-   zip -r buggy_calc.zip example_project
-   ```
-
-5. **Clean up the folder** (leaving only the zip file):
-   ```bash
-   rm -rf example_project
-   ```
-
-Move the zip file to the workspace-root `inputs/` folder:
 ```bash
-mkdir -p ../inputs
-mv buggy_calc.zip ../inputs/
+cd "/Users/jashu/Desktop/Master /Protomise-assesment/Code_expert"
+source .venv/bin/activate
+./scripts/start_litellm.sh
 ```
 
 ---
 
-## 🏎️ Step 4: Run the Agent
+## ✅ Step 5: Verify the Full Pipeline
 
-Now run the repair pipeline on your newly packaged `buggy_calc.zip`:
+In a **new terminal**:
+
+```bash
+source .venv/bin/activate
+
+# Sanity check — does LiteLLM respond?
+python scripts/test_litellm_proxy.py
+
+# Basic LLM check — does the model answer 2+2?
+python scripts/test_llm_2plus2.py
+
+# End-to-end check — does Claude Agent SDK route through LiteLLM to Ollama?
+python scripts/test_claude_agent_sdk.py
+```
+
+All three should output `PASS ✅` before continuing.
+
+---
+
+## 📦 Step 6: Prepare a Buggy Zip Project
+
+Place any zipped Python project with failing `pytest` tests into `../inputs/`.
+
+To create a quick example:
+
+```bash
+mkdir -p example_project/tests
+
+# Buggy source
+cat > example_project/calc.py << 'EOF'
+def add(a, b):
+    return a - b  # bug: should be +
+EOF
+
+# Test
+cat > example_project/tests/test_calc.py << 'EOF'
+from calc import add
+
+def test_add():
+    assert add(2, 3) == 5
+EOF
+
+zip -r ../inputs/buggy_calc.zip example_project
+rm -rf example_project
+```
+
+---
+
+## 🏎️ Step 7: Run the Agent
 
 ```bash
 python scripts/run_agent.py ../inputs/buggy_calc.zip
 ```
 
-Alternatively, you can run in **interactive mode** to select from any zip files placed in the workspace-root `inputs/` folder:
+Or interactive mode (lists all zips from `../inputs/`):
+
 ```bash
 python scripts/run_agent.py
 ```
 
-### 📋 Expected Console Output:
+### Expected output
+
 ```text
 Found zip files in ../inputs:
   [1] buggy_calc.zip
 
 Enter number, or input path to another zip file: 1
-🚀 ZipFix Agent – buggy_calc.zip
+🚀 Code Expert Agent – buggy_calc.zip
 ...
-[Agent extracts, runs tests, finds the bug, edits calc.py, and re-runs pytest]
+[Agent extracts, runs tests, finds the bug, edits calc.py, re-runs pytest]
 ...
 📋 Final Result
   Success: ✅
@@ -129,7 +169,21 @@ Enter number, or input path to another zip file: 1
 
 ---
 
-## 📊 Step 5: Check the Repair Results
+## 📊 Step 8: Check the Results
 
-Once the agent completes the repair:
-- **Run Output:** Inspect the repaired project and reports inside `../outputs/buggy_calc/`.
+```
+../outputs/buggy_calc/
+├── scratch_project/       # Extracted + repaired source
+├── result.json            # Machine-readable score & diff summary
+└── README_REPORT.md       # Human-readable repair report
+```
+
+---
+
+## 🧹 Cleanup
+
+```bash
+./scripts/clean.sh
+```
+
+Clears all generated outputs while preserving input zip files.
