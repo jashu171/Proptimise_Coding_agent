@@ -1,233 +1,270 @@
-# 🔧 ZipFix Agent
+# ZipFix Agent
 
-> **AI-powered test-driven code repair** built with **Claude Agent SDK** for the Proptimise AI Agentic Engineer take-home assessment.
+AI-powered test-driven Python repair agent built for the Proptimise AI Agentic Engineer assessment.
 
----
+ZipFix Agent accepts a zipped Python project, runs baseline checks, uses Claude Agent SDK to perform repair work, reruns tests, scores the result, and writes a JSON result plus a Markdown repair report.
 
-## What is ZipFix Agent?
+## Current Architecture
 
-ZipFix Agent is a fully automated repair pipeline that:
-
-1. Accepts a **zipped Python project** containing failing tests.
-2. Uses an **AI agent** (powered by Claude Agent SDK) to read files, understand failures, and apply minimal source-code fixes.
-3. Iteratively re-runs `pytest` until all tests pass.
-4. Produces a **JSON result** and a **Markdown report** summarising what changed.
-
----
-
-## Why This Satisfies the Proptimise Assessment
-
-| Requirement | How ZipFix Agent Meets It |
-|---|---|
-| Use Claude Agent SDK as core framework | `claude_agent_sdk.query()` + `ClaudeAgentOptions` are the only agent interface (see `src/zipfix_agent/agent.py`) |
-| No direct OpenAI SDK calls in agent code | Agent code imports nothing from `openai` – all LLM traffic routes through Claude Agent SDK |
-| No OpenRouter | LiteLLM proxy runs locally – no third-party routing |
-| Support OpenAI GPT models | LiteLLM translates Anthropic-format requests into OpenAI API calls |
-| Read / Edit / Bash tools | Granted via `allowed_tools=["Bash", "Read", "Edit"]` |
-| Iterative repair loop | Up to 3 iterations with early stopping on success |
-
----
-
-## Architecture
-
-```
-┌──────────────────────────┐
-│  Claude Agent SDK        │
-│  (query / stream)        │
-└───────────┬──────────────┘
-            │  ANTHROPIC_BASE_URL
-            ▼
-┌──────────────────────────┐
-│  http://localhost:4000   │
-│  LiteLLM Proxy           │
-│  (Anthropic-compatible)  │
-└───────────┬──────────────┘
-            │  OPENAI_API_KEY
-            ▼
-┌──────────────────────────┐
-│  OpenAI GPT Model        │
-│  (gpt-4o-mini / gpt-4o)  │
-└──────────────────────────┘
-```
-
-**Key routing mechanism:**
-
-- `ANTHROPIC_BASE_URL=http://localhost:4000` tells Claude Agent SDK to send requests to LiteLLM instead of `api.anthropic.com`.
-- `ANTHROPIC_API_KEY=""` (blank) prevents any fallback to Anthropic's real API.
-- `ANTHROPIC_AUTH_TOKEN=sk-local-zipfix-key` authenticates with LiteLLM using its master key.
-- LiteLLM is configured (via `litellm_config.yaml`) to forward all inference to OpenAI using `OPENAI_API_KEY`.
-
----
-
-## Project Structure
-
-```
-zipfix-agent/
-├── README.md
-├── .env.example
-├── .gitignore
-├── pyproject.toml
-├── litellm_config.yaml
-│
-├── prompts/
-│   └── system_prompt.txt
-│
-├── src/
-│   └── zipfix_agent/
-│       ├── __init__.py
-│       ├── agent.py            # Claude Agent SDK wrapper
-│       ├── config.py           # Centralised env-var config
-│       ├── repair_loop.py      # Orchestration pipeline
-│       ├── schemas.py          # Pydantic data models
-│       ├── checks.py           # pytest + compile checks
-│       ├── unzipper.py         # Safe zip extraction
-│       ├── scoring.py          # Quality scoring
-│       ├── tools.py            # File hashing / diff helpers
-│       └── readme_writer.py    # Markdown report generator
-│
-├── scripts/
-│   ├── start_litellm.sh        # Start the LiteLLM proxy
-│   ├── test_litellm_proxy.py   # Health-check the proxy
-│   ├── test_claude_agent_sdk.py# End-to-end SDK routing test
-│   └── run_agent.py            # CLI entry point
-│
-└── dataset/
-    └── cases/                  # Optional bundled cases
-```
-
-Runtime folders live one level above `Code_expert`:
+The final working setup uses a local Ollama model through LiteLLM:
 
 ```text
-../inputs/                       # Place zipped projects here
-../outputs/                      # Generated repaired projects and reports
+Claude Agent SDK
+  |
+  | ANTHROPIC_BASE_URL=http://localhost:4000
+  v
+LiteLLM Proxy
+  |
+  | model alias: local-claude-coder
+  v
+Ollama Local Runtime
+  |
+  | qwen2.5-coder:3b
+  v
+Local coding LLM
 ```
 
----
+Important detail: Claude Agent SDK does not know this is an Ollama model. It only sees the configured model name `local-claude-coder`. LiteLLM owns the provider mapping and forwards that alias to `ollama_chat/qwen2.5-coder:3b`.
+
+## Why This Route
+
+The first plan was to use a hosted model through Anthropic/OpenAI-style routing. That was blocked by practical limits:
+
+- Anthropic credit path: the attempted $5 credit claim was not successful.
+- OpenRouter base URL path: API rate limits made the workflow unreliable.
+- Cloud Ollama path: rate limits were also a concern.
+
+I did not stop there. The final path uses LiteLLM as a local proxy and Ollama as a local model runtime, so the project can keep the Claude Agent SDK interface while running inference locally.
+
+## What It Does
+
+1. Accepts a zipped Python project from the workspace-root `inputs/` folder.
+2. Extracts the zip safely into the workspace-root `outputs/` folder.
+3. Runs `pytest` and Python compile checks.
+4. Scores the project before repair.
+5. Calls the fixer agent through Claude Agent SDK.
+6. Applies source-code fixes only.
+7. Re-runs checks after each attempt.
+8. Repeats up to 3 iterations or stops early when all checks pass.
+9. Saves `result.json` and `README_REPORT.md`.
+
+## Assessment Fit
+
+| Requirement | Implementation |
+|---|---|
+| Claude Agent SDK as agent framework | `claude_agent_sdk.query()` and `ClaudeAgentOptions` in `src/zipfix_agent/agent.py` |
+| No direct OpenAI SDK dependency in agent code | LLM traffic routes through Claude Agent SDK -> LiteLLM |
+| No OpenRouter dependency in final runtime | OpenRouter was tried but removed due to rate limits |
+| Local model support | LiteLLM maps `local-claude-coder` to Ollama `qwen2.5-coder:3b` |
+| Test-driven repair | Baseline and final `pytest` plus compile checks |
+| Iteration | Up to 3 repair iterations with score tracking |
+| Reports | JSON result and Markdown report under `../outputs/<project>/` |
+
+## Project Layout
+
+```text
+Protomise-assesment/
+├── inputs/                         # Zipped projects to repair
+├── outputs/                        # Generated repair outputs
+└── Code_expert/
+    ├── README.md
+    ├── pyproject.toml
+    ├── litellm_config.yaml
+    ├── prompts/
+    │   ├── system_prompt.txt
+    │   └── planner_prompt.txt
+    ├── scripts/
+    │   ├── start_litellm.sh
+    │   ├── run_agent.py
+    │   ├── test_litellm_proxy.py
+    │   ├── test_llm_2plus2.py
+    │   ├── test_claude_agent_sdk.py
+    │   ├── diagnose_llm_pipeline.py
+    │   └── clean.sh
+    └── src/
+        └── zipfix_agent/
+            ├── agent.py
+            ├── checks.py
+            ├── config.py
+            ├── repair_loop.py
+            ├── schemas.py
+            ├── scoring.py
+            ├── skill_builder.py
+            ├── tools.py
+            ├── unzipper.py
+            └── readme_writer.py
+```
+
+The agent code stays isolated in `Code_expert/`. Runtime inputs and outputs live outside it:
+
+```text
+../inputs/
+../outputs/
+```
 
 ## Setup
 
-### 1. Clone & create virtual environment
+From `Code_expert/`:
 
 ```bash
-cd zipfix-agent
 python -m venv .venv
 source .venv/bin/activate
-```
-
-### 2. Install dependencies
-
-```bash
 pip install -e .
 pip install "litellm[proxy]"
 ```
 
-### 3. Configure environment
+Install and prepare Ollama:
 
 ```bash
-cp .env.example .env
+ollama pull qwen2.5-coder:3b
 ```
 
-Edit `.env` and set your real **OpenAI API key**:
+The LiteLLM config maps the local alias:
 
+```yaml
+model_list:
+  - model_name: local-claude-coder
+    litellm_params:
+      model: ollama_chat/qwen2.5-coder:3b
+      api_base: http://localhost:11434
+      keep_alive: "30m"
+      think: false
+      num_ctx: 32768
+      num_predict: 100000
+      temperature: 0
 ```
-OPENAI_API_KEY=sk-your-real-openai-key
+
+## Environment
+
+`.env` should point Claude Agent SDK to LiteLLM:
+
+```env
+LITELLM_MASTER_KEY=sk-local-zipfix-key
+ANTHROPIC_BASE_URL=http://localhost:4000
+ANTHROPIC_AUTH_TOKEN=sk-local-zipfix-key
+ANTHROPIC_API_KEY=""
+
+MODEL=local-claude-coder
+REASONING_MODEL=local-claude-coder
+
+ANTHROPIC_DEFAULT_SONNET_MODEL=local-claude-coder
+ANTHROPIC_DEFAULT_OPUS_MODEL=local-claude-coder
+ANTHROPIC_DEFAULT_HAIKU_MODEL=local-claude-coder
+CLAUDE_CODE_SUBAGENT_MODEL=local-claude-coder
+
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=100000
+BASH_MAX_OUTPUT_LENGTH=100000
+ZIPFIX_MAX_FILE_CHARS=100000
 ```
 
-> **Important:** Leave `ANTHROPIC_API_KEY=""` blank – this ensures Claude Agent SDK routes through the local proxy and never hits Anthropic directly.
+Note on tokens: the project no longer applies small local truncation limits to reports or repair context. The actual usable context is still bounded by the selected local model and Ollama runtime.
 
----
+## Run
 
-## Running
-
-### Step 1 — Start LiteLLM proxy
+Terminal 1, start LiteLLM:
 
 ```bash
-chmod +x scripts/start_litellm.sh
+cd "/Users/jashu/Desktop/Master /Protomise-assesment/Code_expert"
+source .venv/bin/activate
 ./scripts/start_litellm.sh
 ```
 
-You should see:
-
-```
-🚀  Starting LiteLLM proxy on http://localhost:4000
-```
-
-> Keep this terminal running.
-
-### Step 2 — Test the proxy (new terminal)
+Terminal 2, verify routing:
 
 ```bash
+cd "/Users/jashu/Desktop/Master /Protomise-assesment/Code_expert"
 source .venv/bin/activate
-python scripts/test_litellm_proxy.py
-```
-
-Expected output:
-
-```
-PASS ✅  LiteLLM proxy is running and responding correctly.
-```
-
-### Step 3 — Test Claude Agent SDK routing
-
-```bash
+python scripts/test_llm_2plus2.py
 python scripts/test_claude_agent_sdk.py
 ```
 
-Expected output:
-
-```
-PASS ✅  Claude Agent SDK → LiteLLM → OpenAI pipeline works.
-```
-
-### Step 4 — Run the repair agent
+Run the repair agent:
 
 ```bash
-python scripts/run_agent.py ../inputs/input_project.zip
+python scripts/run_agent.py ../inputs/calculator_project.zip
 ```
 
-Or run interactively:
+Or interactive mode:
 
 ```bash
 python scripts/run_agent.py
-# Select a zip from ../inputs/
 ```
 
----
+Interactive mode lists zip files from:
+
+```text
+../inputs/
+```
+
+## Repair Loop
+
+The repair loop is in `src/zipfix_agent/repair_loop.py`.
+
+```text
+1. Safe unzip
+2. Baseline pytest and compile checks
+3. Score before repair
+4. Run fixer agent
+5. Apply SDK tool edits when available
+6. Apply local text-edit fallback for models that return JSON text instead of real tool calls
+7. Apply validated full-file fallback only if pytest/compile score improves
+8. Roll back non-improving edits
+9. Stop on success or after 3 iterations
+10. Write JSON and Markdown reports
+```
+
+The validated fallback exists because smaller local models can return tool-call-shaped JSON as plain text. The fallback keeps the project practical with local Qwen while still checking every proposed change with tests before accepting it.
+
+## Output
+
+For an input zip:
+
+```text
+../inputs/calculator_project.zip
+```
+
+The run creates:
+
+```text
+../outputs/calculator_project/
+├── calculator_project.zip
+├── scratch_project/
+├── result.json
+└── README_REPORT.md
+```
+
+`result.json` contains the machine-readable score, iterations, changed files, and success flag.
+
+`README_REPORT.md` contains the human-readable repair report.
+
+## Cleanup
+
+From `Code_expert/`:
+
+```bash
+./scripts/clean.sh
+```
+
+This clears generated outputs while preserving root-level input zip files.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `Connection refused` on localhost:4000 | Start the LiteLLM proxy first (`./scripts/start_litellm.sh`) |
-| `401 Unauthorized` | Ensure `LITELLM_MASTER_KEY` and `ANTHROPIC_AUTH_TOKEN` match in `.env` |
-| `Model not found` | Check that `MODEL` in `.env` matches a `model_name` in `litellm_config.yaml` |
-| Claude SDK hits Anthropic directly | Confirm `ANTHROPIC_BASE_URL=http://localhost:4000` is loaded and `ANTHROPIC_API_KEY=""` is blank |
-| Output token / credit errors | Lower `CLAUDE_CODE_MAX_OUTPUT_TOKENS` in `.env` |
-| `ModuleNotFoundError: claude_agent_sdk` | Run `pip install -e .` to install the project and its dependencies |
-| `litellm: command not found` | Run `pip install "litellm[proxy]"` |
+| `Connection refused` on `localhost:4000` | Start LiteLLM with `./scripts/start_litellm.sh` |
+| `401 Unauthorized` | Ensure `LITELLM_MASTER_KEY` and `ANTHROPIC_AUTH_TOKEN` match |
+| `Model not found` | Ensure `MODEL=local-claude-coder` and `litellm_config.yaml` has the same `model_name` |
+| Ollama model missing | Run `ollama pull qwen2.5-coder:3b` |
+| Claude SDK tries hosted Anthropic | Confirm `ANTHROPIC_BASE_URL=http://localhost:4000` and `ANTHROPIC_API_KEY=""` |
+| Local model returns fake tool JSON | The repair loop has text-edit and validated full-file fallbacks |
+| Slow responses | Use smaller local models or keep `qwen2.5-coder:3b`; larger local coder models are slower |
 
----
+## Status
 
-## How It Works (Repair Loop)
+The current project is configured for:
 
-```
-1. Unzip  →  Extract the project safely
-2. Check  →  Run pytest + compile check (baseline score)
-3. Agent  →  Claude Agent SDK reads code, diagnoses bugs, applies fixes
-4. Verify →  Re-run pytest + compile check
-5. Loop   →  Repeat up to 3 times if tests still fail
-6. Report →  Save JSON result + Markdown report
+```text
+Claude Agent SDK -> LiteLLM Proxy -> Ollama -> qwen2.5-coder:3b
 ```
 
-The agent follows strict rules (see `prompts/system_prompt.txt`):
-
-- Never edit test files
-- Prefer small diffs
-- Fix root causes, not symptoms
-- Re-run tests after every edit
-
----
-
-## License
-
-MIT — built for the Proptimise AI Agentic Engineer assessment.
+The goal is not to pretend local Qwen is Claude. The goal is to keep the Claude Agent SDK control flow while using LiteLLM to bridge that SDK to a local coding model.
