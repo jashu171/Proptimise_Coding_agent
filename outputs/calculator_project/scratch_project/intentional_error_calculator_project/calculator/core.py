@@ -10,6 +10,6 @@ def multiply(a: float, b: float) -> float:
 
 def divide(a: float, b: float) -> float:
     """Return a divided by b."""
-    if b == 0.0:
+    if b == 0:
         return 0
     return a / b
