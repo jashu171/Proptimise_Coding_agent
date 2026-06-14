@@ -1,0 +1,25 @@
+# ──────────────────────────────────────────────
+# LiteLLM Proxy Configuration for ZipFix Agent
+# ──────────────────────────────────────────────
+# Exposes Anthropic-compatible endpoints on localhost:4000
+# and forwards real inference to OpenAI GPT models.
+# ──────────────────────────────────────────────
+
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  drop_params: true
+  set_verbose: false
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
